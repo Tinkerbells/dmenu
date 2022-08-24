@@ -1,0 +1,2 @@
+#!/bin/sh
+dmenu_path | dmenu -fn "JetBrainsMono NF:size=12" -nb '#282828' -nf '#ebdbb2' -sb '#ebdbb2' -sf '#282828' | ${SHELL:-"/bin/sh"} &
