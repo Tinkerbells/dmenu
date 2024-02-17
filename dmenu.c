@@ -229,7 +229,7 @@ drawmenu(void)
 	drw_setscheme(drw, scheme[SchemeNorm]);
 	if (passwd) {
 		censort = ecalloc(1, sizeof(text));
-		memset(censort, '.', strlen(text));
+		memset(censort, '*', strlen(text));
 		drw_text_align(drw, x, 0, curpos, bh, censort, cursor, AlignR);
 		drw_text_align(drw, x + curpos, 0, w - curpos, bh, censort + cursor, strlen(censort) - cursor, AlignL);
 		free(censort);
