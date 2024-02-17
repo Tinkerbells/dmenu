@@ -49,6 +49,7 @@ static char text[BUFSIZ] = "";
 static char *embed;
 static int bh, mw, mh;
 static int inputw = 0, promptw;
+static int passwd = 0;
 static int lrpad; /* sum of left and right padding */
 static size_t cursor;
 static struct item *items = NULL;
@@ -202,6 +203,7 @@ drawmenu(void)
 	int curlen, rcurlen;
 	struct item *item;
 	int x = 0, y = 0, w, rpad = 0, itw = 0, stw = 0;
+	char *censort;
 
 	drw_setscheme(drw, scheme[SchemeNorm]);
 	drw_rect(drw, 0, 0, mw, mh, 1, 1);
@@ -225,8 +227,16 @@ drawmenu(void)
 	oldcurlen = curlen;
 
 	drw_setscheme(drw, scheme[SchemeNorm]);
-	drw_text_align(drw, x, 0, curpos, bh, text, cursor, AlignR);
-	drw_text_align(drw, x + curpos, 0, w - curpos, bh, text + cursor, strlen(text) - cursor, AlignL);
+	if (passwd) {
+		censort = ecalloc(1, sizeof(text));
+		memset(censort, '.', strlen(text));
+		drw_text_align(drw, x, 0, curpos, bh, censort, cursor, AlignR);
+		drw_text_align(drw, x + curpos, 0, w - curpos, bh, censort + cursor, strlen(censort) - cursor, AlignL);
+		free(censort);
+	} else {
+		drw_text_align(drw, x, 0, curpos, bh, text, cursor, AlignR);
+		drw_text_align(drw, x + curpos, 0, w - curpos, bh, text + cursor, strlen(text) - cursor, AlignL);
+	}
 	drw_rect(drw, x + curpos - 1, 2, 2, bh - 4, 1, 0);
 
 	recalculatenumbers();
@@ -656,6 +666,10 @@ readstdin(void)
 	size_t i, linesiz, itemsiz = 0;
 	ssize_t len;
 
+	if (passwd) {
+		inputw = lines = 0;
+		return;
+	}
 
 	/* read each line from stdin and add it to the item list */
 	for (i = 0; (len = getline(&line, &linesiz, stdin)) != -1; i++) {
@@ -835,6 +849,7 @@ usage(void)
 		"f"
 		"i"
 		"n"
+		"P"
 		"] "
 		"[-l lines] [-p prompt] [-fn font] [-m monitor]"
 		"\n             [-nb color] [-nf color] [-sb color] [-sf color] [-w windowid]"
@@ -882,6 +897,8 @@ main(int argc, char *argv[])
 			fstrstr = cistrstr;
 		} else if (!strcmp(argv[i], "-n")) { /* instant select only match */
 			instant = !instant;
+		} else if (!strcmp(argv[i], "-P")) { /* is the input a password */
+			passwd = 1;
 		} else if (i + 1 == argc)
 			usage();
 		/* these options take one argument */
