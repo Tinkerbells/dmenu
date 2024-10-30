@@ -1,5 +1,3 @@
-#include "highpriority.c"
-#include "multiselect.c"
-#include "mousesupport.c"
+#include "center.c"
 #include "numbers.c"
 #include "xresources.c"

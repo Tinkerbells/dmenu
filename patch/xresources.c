@@ -27,10 +27,8 @@ readxresources(void)
 			colors[SchemeOut][ColBg] = strdup(xval.addr);
 		if (XrmGetResource(xdb, "dmenu.outforeground", "*", &type, &xval))
 			colors[SchemeOut][ColFg] = strdup(xval.addr);
-		if (XrmGetResource(xdb, "dmenu.hpbackground", "*", &type, &xval))
-			colors[SchemeHp][ColBg] = strdup(xval.addr);
-		if (XrmGetResource(xdb, "dmenu.hpforeground", "*", &type, &xval))
-			colors[SchemeHp][ColFg] = strdup(xval.addr);
+		if (XrmGetResource(xdb, "dmenu.bordercolor", "*", &type, &xval))
+			colors[SchemeBorder][ColBg] = strdup(xval.addr);
 		XrmDestroyDatabase(xdb);
 	}
 }

@@ -1,8 +1,9 @@
 /* See LICENSE file for copyright and license details. */
 /* Default settings; can be overriden by command line. */
 
-static int topbar = 1;                      /* -b  option; if 0, dmenu appears at bottom */
-static int instant = 0;                     /* -n  option; if 1, selects matching item without the need to press enter */
+static int topbar = 0;                      /* -b  option; if 0, dmenu appears at bottom */
+static int center = 1;                      /* -c  option; if 0, dmenu won't be centered on the screen */
+static int min_width = 500;                 /* minimum width when centered */
 /* -fn option overrides fonts[0]; default X11 font or font set */
 static char *fonts[] =
 {
@@ -10,17 +11,16 @@ static char *fonts[] =
 };
 static const char *prompt      = NULL;      /* -p  option; prompt to the left of input field */
 
-
 static
 char *colors[][2] = {
 	/*               fg         bg       */
-	[SchemeNorm] = { "#bbbbbb", "#222222" },
-	[SchemeSel]  = { "#eeeeee", "#005577" },
+	[SchemeNorm] = { "#ffffff", "#222222" },
+	[SchemeSel]  = { "#222222", "#ffffff" },
 	[SchemeOut]  = { "#000000", "#00ffff" },
-	[SchemeHp]   = { "#bbbbbb", "#333333" },
+	[SchemeBorder] = { "#000000", "#ffffff" },
 };
 /* -l option; if nonzero, dmenu uses vertical list with given number of lines */
-static unsigned int lines      = 0;
+static unsigned int lines      = 10;
 
 /*
  * Characters not considered part of a word while deleting words
@@ -28,4 +28,6 @@ static unsigned int lines      = 0;
  */
 static const char worddelimiters[] = " ";
 
+/* Size of the window border */
+static unsigned int border_width = 2;
 

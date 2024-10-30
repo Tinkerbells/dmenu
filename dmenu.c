@@ -17,9 +17,6 @@
 #include <X11/Xft/Xft.h>
 
 /* Patch incompatibility overrides */
-#undef NON_BLOCKING_STDIN_PATCH
-#undef PIPEOUT_PATCH
-#undef PRINTINPUTTEXT_PATCH
 
 #include "drw.h"
 #include "util.h"
@@ -34,15 +31,15 @@ enum {
 	SchemeNorm,
 	SchemeSel,
 	SchemeOut,
-	SchemeHp,
+	SchemeBorder,
 	SchemeLast,
 }; /* color schemes */
 
 struct item {
 	char *text;
+	char *stext;
 	struct item *left, *right;
-	int id; /* for multiselect */
-	int hp;
+	int out;
 };
 
 static char text[BUFSIZ] = "";
@@ -56,14 +53,11 @@ static struct item *items = NULL;
 static struct item *matches, *matchend;
 static struct item *prev, *curr, *next, *sel;
 static int mon = -1, screen;
-static int *selid = NULL;
-static unsigned int selidsize = 0;
 
 static Atom clip, utf8;
 static Display *dpy;
 static Window root, parentwin, win;
 static XIC xic;
-
 
 static Drw *drw;
 static Clr *scheme[SchemeLast];
@@ -71,9 +65,6 @@ static Clr *scheme[SchemeLast];
 #include "patch/include.h"
 
 #include "config.h"
-
-static int (*fstrncmp)(const char *, const char *, size_t) = strncmp;
-static char *(*fstrstr)(const char *, const char *) = strstr;
 
 static unsigned int
 textw_clamp(const char *str, unsigned int n)
@@ -100,6 +91,9 @@ static void readstdin(void);
 static void run(void);
 static void setup(void);
 static void usage(void);
+
+static int (*fstrncmp)(const char *, const char *, size_t) = strncmp;
+static char *(*fstrstr)(const char *, const char *) = strstr;
 
 #include "patch/include.c"
 
@@ -147,13 +141,9 @@ cleanup(void)
 	for (i = 0; items && items[i].text; ++i)
 		free(items[i].text);
 	free(items);
-	for (i = 0; i < hplength; ++i)
-		free(hpitems[i]);
-	free(hpitems);
 	drw_free(drw);
 	XSync(dpy, False);
 	XCloseDisplay(dpy);
-	free(selid);
 }
 
 static char *
@@ -171,15 +161,11 @@ static int
 drawitem(struct item *item, int x, int y, int w)
 {
 	int r;
-	char *text = item->text;
-
-
+	char *text = item->stext;
 
 	if (item == sel)
 		drw_setscheme(drw, scheme[SchemeSel]);
-	else if (item->hp)
-		drw_setscheme(drw, scheme[SchemeHp]);
-	else if (issel(item->id))
+	else if (item->out)
 		drw_setscheme(drw, scheme[SchemeOut]);
 	else
 		drw_setscheme(drw, scheme[SchemeNorm]);
@@ -199,8 +185,7 @@ drawitem(struct item *item, int x, int y, int w)
 static void
 drawmenu(void)
 {
-	static int curpos, oldcurlen;
-	int curlen, rcurlen;
+	unsigned int curpos;
 	struct item *item;
 	int x = 0, y = 0, w, rpad = 0, itw = 0, stw = 0;
 	char *censort;
@@ -216,31 +201,29 @@ drawmenu(void)
 	/* draw input field */
 	w = (lines > 0 || !matches) ? mw - x : inputw;
 
-	w -= lrpad / 2;
-	x += lrpad / 2;
-	rcurlen = TEXTW(text + cursor) - lrpad;
-	curlen = TEXTW(text) - lrpad - rcurlen;
-	curpos += curlen - oldcurlen;
-	curpos = MIN(w, MAX(0, curpos));
-	curpos = MAX(curpos, w - rcurlen);
-	curpos = MIN(curpos, curlen);
-	oldcurlen = curlen;
-
 	drw_setscheme(drw, scheme[SchemeNorm]);
 	if (passwd) {
 		censort = ecalloc(1, sizeof(text));
-		memset(censort, '*', strlen(text));
-		drw_text_align(drw, x, 0, curpos, bh, censort, cursor, AlignR);
-		drw_text_align(drw, x + curpos, 0, w - curpos, bh, censort + cursor, strlen(censort) - cursor, AlignL);
+		memset(censort, '.', strlen(text));
+		drw_text(drw, x, 0, w, bh, lrpad / 2, censort, 0
+		);
+		drw_text(drw, x, 0, w, bh, lrpad / 2, censort, 0
+		);
 		free(censort);
 	} else {
-		drw_text_align(drw, x, 0, curpos, bh, text, cursor, AlignR);
-		drw_text_align(drw, x + curpos, 0, w - curpos, bh, text + cursor, strlen(text) - cursor, AlignL);
+		drw_text(drw, x, 0, w, bh, lrpad / 2, text, 0
+		);
 	}
-	drw_rect(drw, x + curpos - 1, 2, 2, bh - 4, 1, 0);
+
+	curpos = TEXTW(text) - TEXTW(&text[cursor]);
+	if ((curpos += lrpad / 2 - 1) < w) {
+		drw_setscheme(drw, scheme[SchemeNorm]);
+		drw_rect(drw, x + curpos, 2, 2, bh - 4, 1, 0);
+	}
 
 	recalculatenumbers();
 	rpad = TEXTW(numbers);
+	rpad += border_width;
 	if (lines > 0) {
 		/* draw vertical list */
 		for (item = curr; item != next; item = item->right)
@@ -257,7 +240,7 @@ drawmenu(void)
 		x += w;
 		for (item = curr; item != next; item = item->right) {
 			stw = TEXTW(">");
-			itw = textw_clamp(item->text, mw - x - stw - rpad);
+			itw = textw_clamp(item->stext, mw - x - stw - rpad);
 			x = drawitem(item, x, 0, itw);
 		}
 		if (next) {
@@ -320,7 +303,6 @@ match(void)
 	int i, tokc = 0;
 	size_t len, textsize;
 	struct item *item, *lprefix, *lsubstr, *prefixend, *substrend;
-	struct item *lhpprefix, *hpprefixend;
 
 	strcpy(buf, text);
 	/* separate input text into tokens to be matched individually */
@@ -331,7 +313,6 @@ match(void)
 
 	matches = lprefix = lsubstr = matchend = prefixend = substrend = NULL;
 	textsize = strlen(text) + 1;
-	lhpprefix = hpprefixend = NULL;
 	for (item = items; item && item->text; item++)
 	{
 		for (i = 0; i < tokc; i++)
@@ -339,23 +320,13 @@ match(void)
 				break;
 		if (i != tokc) /* not all tokens match */
 			continue;
-		/* exact matches go first, then prefixes with high priority, then prefixes, then substrings */
+		/* exact matches go first, then prefixes, then substrings */
 		if (!tokc || !fstrncmp(text, item->text, textsize))
 			appenditem(item, &matches, &matchend);
-		else if (item->hp && !fstrncmp(tokv[0], item->text, len))
-			appenditem(item, &lhpprefix, &hpprefixend);
 		else if (!fstrncmp(tokv[0], item->text, len))
 			appenditem(item, &lprefix, &prefixend);
 		else
 			appenditem(item, &lsubstr, &substrend);
-	}
-	if (lhpprefix) {
-		if (matches) {
-			matchend->right = lhpprefix;
-			lhpprefix->left = matchend;
-		} else
-			matches = lhpprefix;
-		matchend = hpprefixend;
 	}
 	if (lprefix) {
 		if (matches) {
@@ -376,12 +347,6 @@ match(void)
 	}
 	curr = sel = matches;
 
-	if (instant && matches && matches==matchend && !lsubstr) {
-		puts(matches->text);
-		cleanup();
-		exit(0);
-	}
-
 	calcoffsets();
 }
 
@@ -390,7 +355,6 @@ insert(const char *str, ssize_t n)
 {
 	if (strlen(text) + n > sizeof text - 1)
 		return;
-
 
 	/* move existing text out of the way, insert new text, and update cursor */
 	memmove(&text[cursor + n], &text[cursor], sizeof text - cursor - MAX(n, 0));
@@ -498,7 +462,6 @@ keypress(XKeyEvent *ev)
 			goto draw;
 		case XK_Return:
 		case XK_KP_Enter:
-			selsel();
 			break;
 		case XK_bracketleft:
 			cleanup();
@@ -603,11 +566,13 @@ insert:
 		break;
 	case XK_Return:
 	case XK_KP_Enter:
+		puts((sel && !(ev->state & ShiftMask)) ? sel->text : text);
 		if (!(ev->state & ControlMask)) {
-			printsel(ev->state);
 			cleanup();
 			exit(0);
 		}
+		if (sel)
+			sel->out = 1;
 		break;
 	case XK_Right:
 	case XK_KP_Right:
@@ -657,11 +622,11 @@ paste(void)
 	drawmenu();
 }
 
-
 static void
 readstdin(void)
 {
 	char *line = NULL;
+	char *buf, *p;
 
 	size_t i, linesiz, itemsiz = 0;
 	ssize_t len;
@@ -683,9 +648,13 @@ readstdin(void)
 
 		if (!(items[i].text = strdup(line)))
 			die("strdup:");
-		items[i].id = i; /* for multiselect */
+		if (!(buf = strdup(line)))
+			die("cannot strdup %u bytes:", strlen(line) + 1);
+		if ((p = strchr(buf, '\t')))
+			*p = '\0';
+		items[i].stext = buf;
+		items[i].out = 0;
 
-		items[i].hp = arrayhas(hpitems, hplength, items[i].text);
 	}
 	free(line);
 	if (items)
@@ -697,14 +666,10 @@ static void
 run(void)
 {
 	XEvent ev;
-
 	while (!XNextEvent(dpy, &ev)) {
 		if (XFilterEvent(&ev, win))
 			continue;
 		switch(ev.type) {
-		case ButtonPress:
-			buttonpress(&ev);
-			break;
 		case DestroyNotify:
 			if (ev.xdestroywindow.window != win)
 				break;
@@ -760,6 +725,7 @@ setup(void)
 	bh = drw->fonts->h + 2;
 	lines = MAX(lines, 0);
 	mh = (lines + 1) * bh;
+	promptw = (prompt && *prompt) ? TEXTW(prompt) - lrpad / 4 : 0;
 #ifdef XINERAMA
 	i = 0;
 	if (parentwin == root && (info = XineramaQueryScreens(dpy, &n))) {
@@ -786,9 +752,15 @@ setup(void)
 				if (INTERSECT(x, y, 1, 1, info[i]) != 0)
 					break;
 
-		x = info[i].x_org;
-		y = info[i].y_org + (topbar ? 0 : info[i].height - mh);
-		mw = info[i].width;
+		if (center) {
+			mw = MIN(MAX(max_textw() + promptw, min_width), info[i].width);
+			x = info[i].x_org + ((info[i].width  - mw) / 2);
+			y = info[i].y_org + ((info[i].height - mh) / 2);
+		} else {
+			x = info[i].x_org;
+			y = info[i].y_org + (topbar ? 0 : info[i].height - mh);
+			mw = info[i].width;
+		}
 		XFree(info);
 	} else
 #endif
@@ -796,11 +768,16 @@ setup(void)
 		if (!XGetWindowAttributes(dpy, parentwin, &wa))
 			die("could not get embedding window attributes: 0x%lx",
 			    parentwin);
-		x = 0;
-		y = topbar ? 0 : wa.height - mh;
-		mw = wa.width;
+		if (center) {
+			mw = MIN(MAX(max_textw() + promptw, min_width), wa.width);
+			x = (wa.width  - mw) / 2;
+			y = (wa.height - mh) / 2;
+		} else {
+			x = 0;
+			y = topbar ? 0 : wa.height - mh;
+			mw = wa.width;
+		}
 	}
-	promptw = (prompt && *prompt) ? TEXTW(prompt) - lrpad / 4 : 0;
 	inputw = mw / 3; /* input width: ~33.33% of monitor width */
 	match();
 
@@ -808,16 +785,16 @@ setup(void)
 	swa.override_redirect = True;
 	swa.background_pixel = scheme[SchemeNorm][ColBg].pixel;
 	swa.event_mask = ExposureMask | KeyPressMask | VisibilityChangeMask
-		| ButtonPressMask
 	;
 	win = XCreateWindow(
 		dpy, root,
-		x, y, mw, mh, 0,
+		x, y - (topbar ? 0 : border_width * 2), mw - border_width * 2, mh, border_width,
 		CopyFromParent, CopyFromParent, CopyFromParent,
 		CWOverrideRedirect | CWBackPixel | CWEventMask, &swa
 	);
+	if (border_width)
+		XSetWindowBorder(dpy, win, scheme[SchemeBorder][ColBg].pixel);
 	XSetClassHint(dpy, win, &ch);
-
 
 	/* input methods */
 	if ((xim = XOpenIM(dpy, NULL, NULL, NULL)) == NULL)
@@ -825,7 +802,6 @@ setup(void)
 
 	xic = XCreateIC(xim, XNInputStyle, XIMPreeditNothing | XIMStatusNothing,
 	                XNClientWindow, win, XNFocusWindow, win, NULL);
-
 
 	XMapRaised(dpy, win);
 	if (embed) {
@@ -846,15 +822,15 @@ static void
 usage(void)
 {
 	die("usage: dmenu [-bv"
+		"c"
 		"f"
 		"i"
-		"n"
 		"P"
 		"] "
 		"[-l lines] [-p prompt] [-fn font] [-m monitor]"
 		"\n             [-nb color] [-nf color] [-sb color] [-sf color] [-w windowid]"
 		"\n            "
-		" [-hb color] [-hf color] [-hp items]"
+		" [-bw width]"
 		"\n");
 }
 
@@ -869,6 +845,21 @@ main(int argc, char *argv[])
 		fputs("warning: no locale support\n", stderr);
 	if (!(dpy = XOpenDisplay(NULL)))
 		die("cannot open display");
+
+	/* These need to be checked before we init the visuals and read X resources. */
+	for (i = 1; i < argc; i++) {
+		if (!strcmp(argv[i], "-v")) { /* prints version information */
+			puts("dmenu-"VERSION);
+			exit(0);
+		} else if (!strcmp(argv[i], "-w")) {
+			argv[i][0] = '\0';
+			embed = strdup(argv[++i]);
+		} else {
+			continue;
+		}
+		argv[i][0] = '\0'; // mark as used
+	}
+
 	screen = DefaultScreen(dpy);
 	root = RootWindow(dpy, screen);
 	if (!embed || !(parentwin = strtol(embed, NULL, 0)))
@@ -890,13 +881,13 @@ main(int argc, char *argv[])
 			exit(0);
 		} else if (!strcmp(argv[i], "-b")) { /* appears at the bottom of the screen */
 			topbar = 0;
+		} else if (!strcmp(argv[i], "-c")) { /* toggles centering of dmenu window on screen */
+			center = !center;
 		} else if (!strcmp(argv[i], "-f")) { /* grabs keyboard before reading stdin */
 			fast = 1;
 		} else if (!strcmp(argv[i], "-i")) { /* case-insensitive item matching */
 			fstrncmp = strncasecmp;
 			fstrstr = cistrstr;
-		} else if (!strcmp(argv[i], "-n")) { /* instant select only match */
-			instant = !instant;
 		} else if (!strcmp(argv[i], "-P")) { /* is the input a password */
 			passwd = 1;
 		} else if (i + 1 == argc)
@@ -918,14 +909,8 @@ main(int argc, char *argv[])
 			colors[SchemeSel][ColBg] = argv[++i];
 		else if (!strcmp(argv[i], "-sf"))  /* selected foreground color */
 			colors[SchemeSel][ColFg] = argv[++i];
-		else if (!strcmp(argv[i], "-hb"))  /* high priority background color */
-			colors[SchemeHp][ColBg] = argv[++i];
-		else if (!strcmp(argv[i], "-hf")) /* low priority background color */
-			colors[SchemeHp][ColFg] = argv[++i];
-		else if (!strcmp(argv[i], "-hp"))
-			hpitems = tokenize(argv[++i], ",", &hplength);
-		else if (!strcmp(argv[i], "-w"))   /* embedding window id */
-			embed = argv[++i];
+		else if (!strcmp(argv[i], "-bw"))  /* border width around dmenu */
+			border_width = atoi(argv[++i]);
 		else {
 			usage();
 		}
@@ -935,8 +920,6 @@ main(int argc, char *argv[])
 		die("no fonts could be loaded.");
 
 	lrpad = drw->fonts->h;
-
-
 
 #ifdef __OpenBSD__
 	if (pledge("stdio rpath", NULL) == -1)

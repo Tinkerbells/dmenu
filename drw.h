@@ -1,6 +1,5 @@
 /* See LICENSE file for copyright and license details. */
 
-
 typedef struct {
 	Cursor cursor;
 } Cur;
@@ -58,4 +57,3 @@ int drw_text(Drw *drw, int x, int y, unsigned int w, unsigned int h, unsigned in
 /* Map functions */
 void drw_map(Drw *drw, Window win, int x, int y, unsigned int w, unsigned int h);
 
-#include "patch/scroll.h"
